@@ -1,0 +1,3632 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "QEXPRESS Delivery API",
+    "version": "1.0.2",
+    "description": "Integrate shipment creation, pricing, tracking, labels, and returns with QEXPRESS.\n\n## Authentication\nSend your raw API key in `Authorization: YOUR_API_KEY`. Do not prepend `Bearer ` and do not use an `api_key` header. Use `Content-Type: application/json` for POST. Supply `X-Odoo-Database` only with the database name assigned by QEXPRESS when database selection requires it. Production and staging IDs/database names are not interchangeable. Optional `lang` / `Accept-Language` headers select installed translations; the current user language is used when no language header is provided.\n\n## Recommended integration flow\n1. Obtain your API key and assigned environment/database from QEXPRESS.\n2. Read countries and active currencies; then contract-covered cities/areas.\n3. Quote with `POST /api/delivery/cost` if needed.\n4. Create with `POST /api/delivery_request`, including shipper information when pickup differs from your saved customer area, and a unique customer tracking reference.\n5. Decode the returned label; poll the tracking endpoint as needed.\n6. Use the return endpoint only for eligible delivered shipments.\n\n## Request and response conventions\nAll example IDs, references, dates, prices and addresses are illustrative. Requests are ordinary HTTP JSON, not JSON-RPC envelopes. Error `data` is optional. Handled errors use the Error schema; uncaught Odoo/proxy errors may instead return HTML/text. No API rate-limit, pagination or idempotency-key contract is defined by these delivery controllers. Use bounded retries for reads; reconcile writes before retrying. Never log credentials.\n\nRequest datetime strings are interpreted in the API user timezone with company/Asia/Amman fallback and converted to UTC. Tracking attempt date strings are UTC. Use real country/area/currency IDs from the same environment. Monetary precision and maximum COD digits depend on account/currency configuration.\n\n## Availability\nThese are the installed customer delivery integration endpoints. Portal session APIs, migration/admin/backup endpoints and internal financial exports are documented separately in the developer route inventory; they do not use this API-key contract. `/api/contact`, `/api/help` and `/re_logistics_api/sync` belong to modules currently uninstalled locally and are not advertised as available. This reference does not claim production testing or deployment.\n\n\n## Coordinates\nThe customer delivery-create API accepts optional receiver_latitude and receiver_longitude together, or receiver_details.latitude/longitude as nested aliases. These save a receiver destination pin, with top-level fields taking precedence. Omit/null both to leave the pin empty; zero is valid. Both are JSON numbers and must be within -90..90 / -180..180. Use shipper_details.area_id/address for pickup and area_id plus receiver_details.address for destination. Driver delivery-attempt GPS, attendance coordinates and live-vehicle tracking are separate portal/internal workflows; this change does not add shipper coordinates or change tracking response fields.\n\n## Optional website-form endpoints\nThe previous published reference included /api/contact and /api/help. They are retained below under Optional website forms with complete schemas, but require re_website_form_api, which is uninstalled locally. Their production availability is unverified. They accept form data, not JSON. Use the raw Authorization key; these website-form helpers also accept a Bearer prefix, unlike the delivery helper.\n"
+  },
+  "servers": [
+    {
+      "url": "https://portal.qexpress-sy.com",
+      "description": "QEXPRESS production API. Confirm your assigned environment with QEXPRESS."
+    }
+  ],
+  "tags": [
+    {
+      "name": "Geography",
+      "description": "Countries, active currencies and contract coverage."
+    },
+    {
+      "name": "Delivery requests",
+      "description": "Create express/local shipments with origin, destination and product/box details."
+    },
+    {
+      "name": "Pricing",
+      "description": "Read-only cost quotation."
+    },
+    {
+      "name": "Labels",
+      "description": "PDF/PNG shipping-label retrieval."
+    },
+    {
+      "name": "Tracking",
+      "description": "Shipment state and attempt history."
+    },
+    {
+      "name": "Returns",
+      "description": "Create and confirm eligible returns."
+    },
+    {
+      "name": "Optional website forms",
+      "description": "Deployment-dependent: requires re_website_form_api. Uninstalled locally; production availability unverified."
+    }
+  ],
+  "security": [
+    {
+      "ApiKeyAuth": []
+    }
+  ],
+  "paths": {
+    "/api/countries": {
+      "get": {
+        "operationId": "getCountries",
+        "summary": "List countries",
+        "tags": [
+          "Geography"
+        ],
+        "description": "Returns all countries, with Syria, Jordan and Iraq first, then other countries by name. No request body.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Database"
+          },
+          {
+            "$ref": "#/components/parameters/Language"
+          },
+          {
+            "$ref": "#/components/parameters/AcceptLanguage"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CountriesResponse"
+                },
+                "example": {
+                  "success": true,
+                  "data": [
+                    {
+                      "id": 211,
+                      "name": "Syria",
+                      "code": "SY"
+                    }
+                  ],
+                  "message": "Countries fetched successfully."
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/currencies": {
+      "get": {
+        "operationId": "getCurrencies",
+        "summary": "List active currencies",
+        "tags": [
+          "Geography"
+        ],
+        "description": "Returns only active currencies, sorted by name. Use returned IDs; they are database-specific. No request body.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Database"
+          },
+          {
+            "$ref": "#/components/parameters/Language"
+          },
+          {
+            "$ref": "#/components/parameters/AcceptLanguage"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrenciesResponse"
+                },
+                "example": {
+                  "success": true,
+                  "data": [
+                    {
+                      "id": 1,
+                      "name": "USD",
+                      "symbol": "$",
+                      "position": "before"
+                    }
+                  ],
+                  "message": "Currencies fetched successfully."
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/cities": {
+      "get": {
+        "operationId": "getCitiesByQuery",
+        "summary": "List covered cities",
+        "tags": [
+          "Geography"
+        ],
+        "description": "Requires a current active delivery contract for the authenticated commercial customer, valid for today and not marked walk-in. Only active areas covered by its area/zone rules are returned. A missing contract returns 403. An empty covered list can still be a successful 200.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Database"
+          },
+          {
+            "$ref": "#/components/parameters/Language"
+          },
+          {
+            "$ref": "#/components/parameters/AcceptLanguage"
+          },
+          {
+            "name": "country_id",
+            "in": "query",
+            "required": true,
+            "description": "Country ID returned by /api/countries.",
+            "schema": {
+              "type": "integer",
+              "description": "Database ID returned by a lookup endpoint.",
+              "minimum": 1,
+              "examples": [
+                152
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CitiesResponse"
+                },
+                "example": {
+                  "success": true,
+                  "data": [
+                    {
+                      "id": 10,
+                      "name": "Example City",
+                      "code": "EX",
+                      "country_id": 211,
+                      "country_name": "Syria",
+                      "country_code": "SY"
+                    }
+                  ],
+                  "message": "Cities fetched successfully."
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/cities/{country_id}": {
+      "get": {
+        "operationId": "getCitiesByCountry",
+        "summary": "List covered cities by country",
+        "tags": [
+          "Geography"
+        ],
+        "description": "Requires a current active delivery contract for the authenticated commercial customer, valid for today and not marked walk-in. Only active areas covered by its area/zone rules are returned. A missing contract returns 403. An empty covered list can still be a successful 200. Path alternative to GET /api/cities?country_id=... .",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Database"
+          },
+          {
+            "$ref": "#/components/parameters/Language"
+          },
+          {
+            "$ref": "#/components/parameters/AcceptLanguage"
+          },
+          {
+            "name": "country_id",
+            "in": "path",
+            "required": true,
+            "description": "Country ID returned by /api/countries.",
+            "schema": {
+              "type": "integer",
+              "description": "Database ID returned by a lookup endpoint.",
+              "minimum": 1,
+              "examples": [
+                152
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CitiesResponse"
+                },
+                "example": {
+                  "success": true,
+                  "data": [
+                    {
+                      "id": 10,
+                      "name": "Example City",
+                      "code": "EX",
+                      "country_id": 211,
+                      "country_name": "Syria",
+                      "country_code": "SY"
+                    }
+                  ],
+                  "message": "Cities fetched successfully."
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/areas/{country_id}": {
+      "get": {
+        "operationId": "getAreasByCountry",
+        "summary": "List covered destination areas",
+        "tags": [
+          "Geography"
+        ],
+        "description": "Requires a current active delivery contract for the authenticated commercial customer, valid for today and not marked walk-in. Only active areas covered by its area/zone rules are returned. A missing contract returns 403. An empty covered list can still be a successful 200. Returns city/zone information. Use area.id for destination area_id; do not substitute country, city or zone IDs.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Database"
+          },
+          {
+            "$ref": "#/components/parameters/Language"
+          },
+          {
+            "$ref": "#/components/parameters/AcceptLanguage"
+          },
+          {
+            "name": "country_id",
+            "in": "path",
+            "required": true,
+            "description": "Country ID returned by /api/countries.",
+            "schema": {
+              "type": "integer",
+              "description": "Database ID returned by a lookup endpoint.",
+              "minimum": 1,
+              "examples": [
+                152
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AreasResponse"
+                },
+                "example": {
+                  "success": true,
+                  "data": [
+                    {
+                      "id": 153,
+                      "name": "Example Area",
+                      "code": "EX-01",
+                      "city_id": 10,
+                      "city_name": "Example City",
+                      "country_id": 211,
+                      "country_name": "Syria",
+                      "zone_id": 2,
+                      "zone_name": "Example Zone"
+                    }
+                  ],
+                  "message": "Areas fetched successfully."
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/403"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/state/{country_code}": {
+      "get": {
+        "operationId": "getStatesByCountryCode",
+        "summary": "List states by country code",
+        "tags": [
+          "Geography"
+        ],
+        "description": "Lists res.country.state IDs and names for a two-character country code such as SY. Code is trimmed and uppercased. This is an administrative state list, distinct from customer-contract-filtered /api/cities. An unknown code can return an empty list.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Database"
+          },
+          {
+            "$ref": "#/components/parameters/Language"
+          },
+          {
+            "$ref": "#/components/parameters/AcceptLanguage"
+          },
+          {
+            "name": "country_code",
+            "in": "path",
+            "required": true,
+            "description": "Two-character country code.",
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 2,
+              "examples": [
+                "SY"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatesResponse"
+                },
+                "example": {
+                  "success": true,
+                  "data": [
+                    {
+                      "id": 10,
+                      "name": "Example State"
+                    }
+                  ],
+                  "message": "Success"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/delivery_request": {
+      "post": {
+        "operationId": "createDeliveryRequest",
+        "summary": "Create delivery request",
+        "tags": [
+          "Delivery requests"
+        ],
+        "description": "Creates one express/local order under the authenticated user commercial customer. Shipper area and destination area are different fields: shipper_details.area_id is optional pickup origin; top-level area_id is required destination. Omitting shipper area uses the customer saved area (or empty if none). Store name is optional. COD requires an active currency and a strictly positive whole amount. Box count must match boxes.length. All example IDs are illustrative; retrieve real IDs using lookup routes. The response includes 10×15 label data. Unique internal_tracking_number is recommended for reconciling retries; this endpoint has no general idempotency key. Current product requirements vary with the portal extension; see CreateProduct. Optional receiver_latitude and receiver_longitude save a receiver destination map pin. Both must be present as numeric values when using a pin; latitude must be -90..90 and longitude -180..180. Both zero values are valid. The Delivery Order shows the pin beside the receiver address with a map link.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Database"
+          },
+          {
+            "$ref": "#/components/parameters/Language"
+          },
+          {
+            "$ref": "#/components/parameters/AcceptLanguage"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryResponse"
+                },
+                "example": {
+                  "success": true,
+                  "data": {
+                    "ref_number": "EXAMPLE000123",
+                    "print_label_type": "application/pdf",
+                    "print_label_image_base64": false,
+                    "print_label_pdf_base64": "JVBERi0xLjQKRXhhbXBsZSBvbmx5Cg=="
+                  },
+                  "message": "Delivery request created successfully."
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "$ref": "#/components/responses/409"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDeliveryRequest"
+              },
+              "examples": {
+                "Prepaid with shipper and store": {
+                  "value": {
+                    "receiver_details": {
+                      "name": "Example Receiver",
+                      "phone": "+963900000000",
+                      "second_phone": "+963900000001",
+                      "address": "Example destination street, building 10"
+                    },
+                    "store_name": "Example Store",
+                    "shipper_details": {
+                      "area_id": 152,
+                      "address": "Example pickup street, building 20"
+                    },
+                    "area_id": 153,
+                    "expected_delivery_datetime": "2026-12-01 14:30:00",
+                    "payment_type": "prepaid",
+                    "is_same_day_delivery": false,
+                    "internal_tracking_number": "CUSTOMER-EXAMPLE-001",
+                    "notes": "Call before delivery",
+                    "products": [
+                      {
+                        "description": "Example T-shirt",
+                        "piece_product_code": "TS-001",
+                        "quantity": 1,
+                        "unit_price": 10,
+                        "volume": 0
+                      }
+                    ],
+                    "num_of_boxes": 1,
+                    "boxes": [
+                      {
+                        "length": 20,
+                        "width": 15,
+                        "height": 5,
+                        "weight": 0.5
+                      }
+                    ],
+                    "receiver_latitude": 33.5138,
+                    "receiver_longitude": 36.2765
+                  }
+                },
+                "COD with shipper and store": {
+                  "value": {
+                    "receiver_details": {
+                      "name": "Example Receiver",
+                      "phone": "+963900000000",
+                      "second_phone": "+963900000001",
+                      "address": "Example destination street, building 10"
+                    },
+                    "store_name": "Example Store",
+                    "shipper_details": {
+                      "area_id": 152,
+                      "address": "Example pickup street, building 20"
+                    },
+                    "area_id": 153,
+                    "expected_delivery_datetime": "2026-12-01 14:30:00",
+                    "payment_type": "cod",
+                    "is_same_day_delivery": false,
+                    "internal_tracking_number": "CUSTOMER-EXAMPLE-002",
+                    "notes": "Call before delivery",
+                    "products": [
+                      {
+                        "description": "Example T-shirt",
+                        "piece_product_code": "TS-001",
+                        "quantity": 1,
+                        "unit_price": 10,
+                        "volume": 0
+                      }
+                    ],
+                    "num_of_boxes": 1,
+                    "boxes": [
+                      {
+                        "length": 20,
+                        "width": 15,
+                        "height": 5,
+                        "weight": 0.5
+                      }
+                    ],
+                    "currency_id": 1,
+                    "cod_amount": 25,
+                    "receiver_latitude": 33.5138,
+                    "receiver_longitude": 36.2765
+                  }
+                },
+                "Top-level shipper aliases": {
+                  "value": {
+                    "receiver_details": {
+                      "name": "Example Receiver",
+                      "phone": "+963900000000",
+                      "second_phone": "+963900000001",
+                      "address": "Example destination street, building 10"
+                    },
+                    "store_name": "Example Store",
+                    "area_id": 153,
+                    "expected_delivery_datetime": "2026-12-01 14:30:00",
+                    "payment_type": "prepaid",
+                    "is_same_day_delivery": false,
+                    "internal_tracking_number": "CUSTOMER-EXAMPLE-003",
+                    "notes": "Call before delivery",
+                    "products": [
+                      {
+                        "description": "Example T-shirt",
+                        "piece_product_code": "TS-001",
+                        "quantity": 1,
+                        "unit_price": 10,
+                        "volume": 0
+                      }
+                    ],
+                    "num_of_boxes": 1,
+                    "boxes": [
+                      {
+                        "length": 20,
+                        "width": 15,
+                        "height": 5,
+                        "weight": 0.5
+                      }
+                    ],
+                    "shipper_area_id": 152,
+                    "shipper_address": "Example pickup address"
+                  }
+                },
+                "Nested receiver coordinates": {
+                  "value": {
+                    "receiver_details": {
+                      "name": "Example Receiver",
+                      "phone": "+963900000000",
+                      "second_phone": "+963900000001",
+                      "address": "Example destination street, building 10",
+                      "latitude": 33.5138,
+                      "longitude": 36.2765
+                    },
+                    "store_name": "Example Store",
+                    "shipper_details": {
+                      "area_id": 152,
+                      "address": "Example pickup street, building 20"
+                    },
+                    "area_id": 153,
+                    "expected_delivery_datetime": "2026-12-01 14:30:00",
+                    "payment_type": "prepaid",
+                    "is_same_day_delivery": false,
+                    "internal_tracking_number": "CUSTOMER-EXAMPLE-004",
+                    "notes": "Call before delivery",
+                    "products": [
+                      {
+                        "description": "Example T-shirt",
+                        "piece_product_code": "TS-001",
+                        "quantity": 1,
+                        "unit_price": 10,
+                        "volume": 0
+                      }
+                    ],
+                    "num_of_boxes": 1,
+                    "boxes": [
+                      {
+                        "length": 20,
+                        "width": 15,
+                        "height": 5,
+                        "weight": 0.5
+                      }
+                    ]
+                  }
+                },
+                "Without receiver coordinates": {
+                  "value": {
+                    "receiver_details": {
+                      "name": "Example Receiver",
+                      "phone": "+963900000000",
+                      "second_phone": "+963900000001",
+                      "address": "Example destination street, building 10"
+                    },
+                    "store_name": "Example Store",
+                    "shipper_details": {
+                      "area_id": 152,
+                      "address": "Example pickup street, building 20"
+                    },
+                    "area_id": 153,
+                    "expected_delivery_datetime": "2026-12-01 14:30:00",
+                    "payment_type": "prepaid",
+                    "is_same_day_delivery": false,
+                    "internal_tracking_number": "CUSTOMER-EXAMPLE-005",
+                    "notes": "Call before delivery",
+                    "products": [
+                      {
+                        "description": "Example T-shirt",
+                        "piece_product_code": "TS-001",
+                        "quantity": 1,
+                        "unit_price": 10,
+                        "volume": 0
+                      }
+                    ],
+                    "num_of_boxes": 1,
+                    "boxes": [
+                      {
+                        "length": 20,
+                        "width": 15,
+                        "height": 5,
+                        "weight": 0.5
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/delivery/cost": {
+      "post": {
+        "operationId": "quoteDeliveryCost",
+        "summary": "Quote delivery cost",
+        "tags": [
+          "Pricing"
+        ],
+        "description": "Calculates express/local pricing without creating any persistent delivery, pickup, invoice or label. This is the implemented quotation route; /api/delivery_request/totals is not implemented in the current local source. Only listed quotation fields are accepted. Currency and COD amount are optional here; when supplied for COD the amount must be a positive whole number. No matching contract/rule returns 422. Example totals illustrate shape, not a price offer.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Database"
+          },
+          {
+            "$ref": "#/components/parameters/Language"
+          },
+          {
+            "$ref": "#/components/parameters/AcceptLanguage"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuoteResponse"
+                },
+                "example": {
+                  "success": true,
+                  "data": {
+                    "cod_commission": 1,
+                    "delivery_cost": 5,
+                    "total": 6
+                  },
+                  "message": "Delivery totals calculated successfully. No order was created."
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "422": {
+            "$ref": "#/components/responses/422"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeliveryQuoteRequest"
+              },
+              "examples": {
+                "COD quote": {
+                  "value": {
+                    "area_id": 153,
+                    "payment_type": "cod",
+                    "currency_id": 1,
+                    "cod_amount": 25,
+                    "boxes": [
+                      {
+                        "length": 20,
+                        "width": 15,
+                        "height": 5,
+                        "weight": 0.5
+                      }
+                    ],
+                    "products": [
+                      {
+                        "description": "Example T-shirt",
+                        "piece_product_code": "TS-001",
+                        "quantity": 1,
+                        "unit_price": 10,
+                        "volume": 0
+                      }
+                    ]
+                  }
+                },
+                "Minimal prepaid quote": {
+                  "value": {
+                    "area_id": 153,
+                    "payment_type": "prepaid",
+                    "boxes": [
+                      {
+                        "length": 20,
+                        "width": 15,
+                        "height": 5,
+                        "weight": 0.5
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/track_delivery_order": {
+      "get": {
+        "operationId": "trackDeliveryByQuery",
+        "summary": "Track shipment",
+        "tags": [
+          "Tracking"
+        ],
+        "description": "Find a shipment by barcode/name, business sequence or internal tracking number. Returns actual current state plus a seven-step progress display and newest-first delivery attempts. The request uses no JSON body. Progress display may represent a fallback step while current_status.code retains the actual state. Attempt dates are stored UTC without a suffix.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Database"
+          },
+          {
+            "$ref": "#/components/parameters/Language"
+          },
+          {
+            "$ref": "#/components/parameters/AcceptLanguage"
+          },
+          {
+            "name": "shipment_number",
+            "in": "query",
+            "required": true,
+            "description": "Shipment reference.",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackingResponse"
+                },
+                "example": {
+                  "success": true,
+                  "data": {
+                    "tracking_details": {
+                      "shipment_number": "EXAMPLE000123",
+                      "internal_tracking_number": "CUSTOMER-EXAMPLE-001",
+                      "current_status": {
+                        "code": "out_for_delivery",
+                        "status": "Out for delivery"
+                      },
+                      "statuses": [
+                        {
+                          "code": "created",
+                          "status": "Created",
+                          "is_completed": true,
+                          "is_current": false
+                        },
+                        {
+                          "code": "collected",
+                          "status": "Collected",
+                          "is_completed": true,
+                          "is_current": false
+                        },
+                        {
+                          "code": "departed",
+                          "status": "Departed",
+                          "is_completed": true,
+                          "is_current": false
+                        },
+                        {
+                          "code": "in_transit",
+                          "status": "In Transit",
+                          "is_completed": true,
+                          "is_current": false
+                        },
+                        {
+                          "code": "arrived_destination",
+                          "status": "Shipment in station",
+                          "is_completed": true,
+                          "is_current": false
+                        },
+                        {
+                          "code": "out_for_delivery",
+                          "status": "Out for delivery",
+                          "is_completed": true,
+                          "is_current": true
+                        },
+                        {
+                          "code": "delivered",
+                          "status": "Delivered",
+                          "is_completed": false,
+                          "is_current": false
+                        }
+                      ]
+                    },
+                    "shipment_history": {
+                      "shipment_attempts": [
+                        {
+                          "reason_note": "Customer not available - Please call first",
+                          "date": "2026-12-01 11:30:00",
+                          "station": "Example Station",
+                          "code": "failed",
+                          "description": "Failed"
+                        }
+                      ]
+                    }
+                  },
+                  "message": "Shipment tracking fetched successfully."
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "404": {
+            "description": "Shipment not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Shipment not found."
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/track_delivery_order/{shipment_number}": {
+      "get": {
+        "operationId": "trackDeliveryByPath",
+        "summary": "Track shipment by reference",
+        "tags": [
+          "Tracking"
+        ],
+        "description": "Find a shipment by barcode/name, business sequence or internal tracking number. Returns actual current state plus a seven-step progress display and newest-first delivery attempts. The request uses no JSON body. Progress display may represent a fallback step while current_status.code retains the actual state. Attempt dates are stored UTC without a suffix.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Database"
+          },
+          {
+            "$ref": "#/components/parameters/Language"
+          },
+          {
+            "$ref": "#/components/parameters/AcceptLanguage"
+          },
+          {
+            "name": "shipment_number",
+            "in": "path",
+            "required": true,
+            "description": "URL-encode the shipment reference as one path segment.",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrackingResponse"
+                },
+                "example": {
+                  "success": true,
+                  "data": {
+                    "tracking_details": {
+                      "shipment_number": "EXAMPLE000123",
+                      "internal_tracking_number": "CUSTOMER-EXAMPLE-001",
+                      "current_status": {
+                        "code": "out_for_delivery",
+                        "status": "Out for delivery"
+                      },
+                      "statuses": [
+                        {
+                          "code": "created",
+                          "status": "Created",
+                          "is_completed": true,
+                          "is_current": false
+                        },
+                        {
+                          "code": "collected",
+                          "status": "Collected",
+                          "is_completed": true,
+                          "is_current": false
+                        },
+                        {
+                          "code": "departed",
+                          "status": "Departed",
+                          "is_completed": true,
+                          "is_current": false
+                        },
+                        {
+                          "code": "in_transit",
+                          "status": "In Transit",
+                          "is_completed": true,
+                          "is_current": false
+                        },
+                        {
+                          "code": "arrived_destination",
+                          "status": "Shipment in station",
+                          "is_completed": true,
+                          "is_current": false
+                        },
+                        {
+                          "code": "out_for_delivery",
+                          "status": "Out for delivery",
+                          "is_completed": true,
+                          "is_current": true
+                        },
+                        {
+                          "code": "delivered",
+                          "status": "Delivered",
+                          "is_completed": false,
+                          "is_current": false
+                        }
+                      ]
+                    },
+                    "shipment_history": {
+                      "shipment_attempts": [
+                        {
+                          "reason_note": "Customer not available - Please call first",
+                          "date": "2026-12-01 11:30:00",
+                          "station": "Example Station",
+                          "code": "failed",
+                          "description": "Failed"
+                        }
+                      ]
+                    }
+                  },
+                  "message": "Shipment tracking fetched successfully."
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Shipment not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Shipment not found."
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
+    },
+    "/api/delivery_label": {
+      "get": {
+        "operationId": "getLabelByQuery",
+        "summary": "Get delivery label",
+        "tags": [
+          "Labels"
+        ],
+        "description": "Returns a 10×15 shipping label for an existing order. Accepts barcode/name, business sequence or internal tracking number. Reference precedence: path reference (when supplied), then JSON ref_number, shipment_number, delivery_order, then query parameters in that order. Select the PDF or PNG field based on print_label_type and availability. POST always requires a valid JSON object, including when the reference is in the URL.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Database"
+          },
+          {
+            "$ref": "#/components/parameters/Language"
+          },
+          {
+            "$ref": "#/components/parameters/AcceptLanguage"
+          },
+          {
+            "name": "ref_number",
+            "in": "query",
+            "required": false,
+            "description": "Preferred shipment reference. At least one query reference is required on the base GET route.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "shipment_number",
+            "in": "query",
+            "required": false,
+            "description": "Alternative shipment reference.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "delivery_order",
+            "in": "query",
+            "required": false,
+            "description": "Alternative shipment reference.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LabelResponse"
+                },
+                "example": {
+                  "success": true,
+                  "data": {
+                    "ref_number": "EXAMPLE000123",
+                    "print_label_type": "application/pdf",
+                    "print_label_image_base64": false,
+                    "print_label_pdf_base64": "JVBERi0xLjQKRXhhbXBsZSBvbmx5Cg=="
+                  },
+                  "message": "Delivery label fetched successfully."
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "404": {
+            "description": "Delivery order not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Delivery order not found."
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      },
+      "post": {
+        "operationId": "getLabelByBody",
+        "summary": "Get delivery label using JSON",
+        "tags": [
+          "Labels"
+        ],
+        "description": "Returns a 10×15 shipping label for an existing order. Accepts barcode/name, business sequence or internal tracking number. Reference precedence: path reference (when supplied), then JSON ref_number, shipment_number, delivery_order, then query parameters in that order. Select the PDF or PNG field based on print_label_type and availability. POST always requires a valid JSON object, including when the reference is in the URL.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Database"
+          },
+          {
+            "$ref": "#/components/parameters/Language"
+          },
+          {
+            "$ref": "#/components/parameters/AcceptLanguage"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LabelResponse"
+                },
+                "example": {
+                  "success": true,
+                  "data": {
+                    "ref_number": "EXAMPLE000123",
+                    "print_label_type": "application/pdf",
+                    "print_label_image_base64": false,
+                    "print_label_pdf_base64": "JVBERi0xLjQKRXhhbXBsZSBvbmx5Cg=="
+                  },
+                  "message": "Delivery label fetched successfully."
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "404": {
+            "description": "Delivery order not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Delivery order not found."
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LabelReference"
+              },
+              "examples": {
+                "By reference": {
+                  "value": {
+                    "ref_number": "EXAMPLE000123"
+                  }
+                },
+                "By internal reference": {
+                  "value": {
+                    "shipment_number": "CUSTOMER-EXAMPLE-001"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/delivery_label/{ref_number}": {
+      "get": {
+        "operationId": "getLabelByPath",
+        "summary": "Get delivery label by reference",
+        "tags": [
+          "Labels"
+        ],
+        "description": "Returns a 10×15 shipping label for an existing order. Accepts barcode/name, business sequence or internal tracking number. Reference precedence: path reference (when supplied), then JSON ref_number, shipment_number, delivery_order, then query parameters in that order. Select the PDF or PNG field based on print_label_type and availability. POST always requires a valid JSON object, including when the reference is in the URL.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Database"
+          },
+          {
+            "$ref": "#/components/parameters/Language"
+          },
+          {
+            "$ref": "#/components/parameters/AcceptLanguage"
+          },
+          {
+            "name": "ref_number",
+            "in": "path",
+            "required": true,
+            "description": "URL-encoded order reference.",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LabelResponse"
+                },
+                "example": {
+                  "success": true,
+                  "data": {
+                    "ref_number": "EXAMPLE000123",
+                    "print_label_type": "application/pdf",
+                    "print_label_image_base64": false,
+                    "print_label_pdf_base64": "JVBERi0xLjQKRXhhbXBsZSBvbmx5Cg=="
+                  },
+                  "message": "Delivery label fetched successfully."
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Delivery order not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Delivery order not found."
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      },
+      "post": {
+        "operationId": "getLabelByPathPost",
+        "summary": "Get delivery label by reference with POST",
+        "tags": [
+          "Labels"
+        ],
+        "description": "Returns a 10×15 shipping label for an existing order. Accepts barcode/name, business sequence or internal tracking number. Reference precedence: path reference (when supplied), then JSON ref_number, shipment_number, delivery_order, then query parameters in that order. Select the PDF or PNG field based on print_label_type and availability. POST always requires a valid JSON object, including when the reference is in the URL.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Database"
+          },
+          {
+            "$ref": "#/components/parameters/Language"
+          },
+          {
+            "$ref": "#/components/parameters/AcceptLanguage"
+          },
+          {
+            "name": "ref_number",
+            "in": "path",
+            "required": true,
+            "description": "URL-encoded order reference.",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LabelResponse"
+                },
+                "example": {
+                  "success": true,
+                  "data": {
+                    "ref_number": "EXAMPLE000123",
+                    "print_label_type": "application/pdf",
+                    "print_label_image_base64": false,
+                    "print_label_pdf_base64": "JVBERi0xLjQKRXhhbXBsZSBvbmx5Cg=="
+                  },
+                  "message": "Delivery label fetched successfully."
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "404": {
+            "description": "Delivery order not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Delivery order not found."
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LabelPathBody"
+              },
+              "examples": {
+                "Reference in URL": {
+                  "value": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/delivery_return": {
+      "post": {
+        "operationId": "createDeliveryReturn",
+        "summary": "Create and confirm delivery return",
+        "tags": [
+          "Returns"
+        ],
+        "description": "Creates a return for a Delivered or Partially Returned order, confirms it and creates its reverse delivery. An existing active return yields 409. Return reasons are customer_refused, damaged, wrong_item, partial_return and other. The lookup accepts original barcode/name or sequence, not an internal tracking reference. Optional area_id changes the reverse order destination. A failure during confirmation should be reconciled before retrying because current error handling can leave a draft return behind.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Database"
+          },
+          {
+            "$ref": "#/components/parameters/Language"
+          },
+          {
+            "$ref": "#/components/parameters/AcceptLanguage"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReturnResponse"
+                },
+                "example": {
+                  "success": true,
+                  "data": {
+                    "return_ref": "RET-EXAMPLE-001",
+                    "delivery_order": "EXAMPLE000123",
+                    "returned_delivery_order": "EXAMPLE000124",
+                    "print_label_type": "application/pdf",
+                    "print_label_image_base64": false,
+                    "print_label_pdf_base64": "JVBERi0xLjQKRXhhbXBsZSBvbmx5Cg=="
+                  },
+                  "message": "Delivery return created successfully."
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "404": {
+            "$ref": "#/components/responses/404"
+          },
+          "409": {
+            "description": "An active return already exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "success": false,
+                  "message": "An active return already exists for this delivery order.",
+                  "data": {
+                    "delivery_order": "EXAMPLE000123"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReturnRequest"
+              },
+              "examples": {
+                "Prepaid return": {
+                  "value": {
+                    "delivery_order": "EXAMPLE000123",
+                    "return_datetime": "2026-12-02 09:00:00",
+                    "return_note": "Customer refused the parcel",
+                    "return_reason": "customer_refused",
+                    "payment_type": "prepaid",
+                    "area_id": 152
+                  }
+                },
+                "COD return": {
+                  "value": {
+                    "delivery_order": "EXAMPLE000123",
+                    "return_datetime": "2026-12-02 09:00:00",
+                    "return_note": "Customer refused the parcel",
+                    "return_reason": "customer_refused",
+                    "payment_type": "cod",
+                    "area_id": 152,
+                    "cod_currency_id": 1,
+                    "cod_amount": 25
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/contact": {
+      "post": {
+        "operationId": "submitContactForm",
+        "summary": "Submit website contact form",
+        "tags": [
+          "Optional website forms"
+        ],
+        "description": "Requires the optional re_website_form_api module, currently uninstalled locally. This is retained for completeness of the earlier published reference, not a claim that the route is available. Submit form fields, not a JSON body. Creates crm.lead. Required phone format is digits only. Returns HTTP 200 on success.",
+        "x-qexpress-availability": {
+          "module": "re_website_form_api",
+          "local_state": "uninstalled",
+          "production": "unverified"
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Database"
+          },
+          {
+            "$ref": "#/components/parameters/Language"
+          },
+          {
+            "$ref": "#/components/parameters/AcceptLanguage"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/ContactForm"
+              },
+              "examples": {
+                "Form fields": {
+                  "value": {
+                    "fullname": "Example Customer",
+                    "email": "customer@example.com",
+                    "phone": "963900000000",
+                    "company": "Example Company",
+                    "subject": "Example request",
+                    "body": "Please contact me about delivery services."
+                  }
+                }
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/ContactForm"
+              },
+              "examples": {
+                "Form fields": {
+                  "value": {
+                    "fullname": "Example Customer",
+                    "email": "customer@example.com",
+                    "phone": "963900000000",
+                    "company": "Example Company",
+                    "subject": "Example request",
+                    "body": "Please contact me about delivery services."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Created successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebsiteFormResponse"
+                },
+                "example": {
+                  "success": true,
+                  "data": {
+                    "id": 1
+                  },
+                  "message": "a new crm lead created successfully."
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          },
+          "404": {
+            "description": "Route unavailable if the optional module is not installed. This may be an Odoo HTML response."
+          }
+        }
+      }
+    },
+    "/api/help": {
+      "post": {
+        "operationId": "submitHelpForm",
+        "summary": "Submit website help form",
+        "tags": [
+          "Optional website forms"
+        ],
+        "description": "Requires the optional re_website_form_api module, currently uninstalled locally. This is retained for completeness of the earlier published reference, not a claim that the route is available. Submit form fields, not a JSON body. Creates helpdesk.ticket. Required phone format is digits only. Returns HTTP 200 on success.",
+        "x-qexpress-availability": {
+          "module": "re_website_form_api",
+          "local_state": "uninstalled",
+          "production": "unverified"
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Database"
+          },
+          {
+            "$ref": "#/components/parameters/Language"
+          },
+          {
+            "$ref": "#/components/parameters/AcceptLanguage"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/HelpForm"
+              },
+              "examples": {
+                "Form fields": {
+                  "value": {
+                    "fullname": "Example Customer",
+                    "email": "customer@example.com",
+                    "phone": "963900000000",
+                    "company": "Example Company",
+                    "subject": "Example request",
+                    "body": "Please contact me about delivery services."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Created successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebsiteFormResponse"
+                },
+                "example": {
+                  "success": true,
+                  "data": {
+                    "id": 1
+                  },
+                  "message": "a new helpdesk ticket created successfully."
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/400"
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          },
+          "404": {
+            "description": "Route unavailable if the optional module is not installed. This may be an Odoo HTML response."
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Authorization",
+        "description": "Raw QEXPRESS/Odoo RPC API key. No Bearer prefix. Never paste a real key into a saved specification."
+      }
+    },
+    "schemas": {
+      "ErrorData": {
+        "type": "object",
+        "properties": {
+          "required_fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "conditional_required_fields": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "field_formats": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "product_required_fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "allowed_values": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "return_reason_enum": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "value",
+                "label"
+              ]
+            }
+          },
+          "internal_tracking_number": {
+            "type": "string"
+          },
+          "unsupported_fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "delivery_order": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true,
+        "description": "Optional endpoint-specific validation details. Other fields may be present."
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "const": false
+          },
+          "message": {
+            "type": "string"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ErrorData"
+          }
+        },
+        "required": [
+          "success",
+          "message"
+        ]
+      },
+      "ReceiverDetails": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Receiver full name.",
+            "minLength": 1,
+            "examples": [
+              "Example Receiver"
+            ]
+          },
+          "phone": {
+            "type": "string",
+            "description": "Receiver phone number as text; preserve leading zeros and country prefix.",
+            "minLength": 1,
+            "examples": [
+              "+963900000000"
+            ]
+          },
+          "second_phone": {
+            "type": "string",
+            "description": "Optional alternative receiver phone.",
+            "examples": [
+              "+963900000001"
+            ]
+          },
+          "address": {
+            "type": "string",
+            "description": "Receiver delivery address.",
+            "minLength": 1,
+            "examples": [
+              "Example street, building 10"
+            ]
+          },
+          "latitude": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": -90,
+            "maximum": 90,
+            "description": "Optional nested alias for receiver_latitude. Supply a latitude/longitude pair. Top-level receiver_latitude takes precedence when present."
+          },
+          "longitude": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": -180,
+            "maximum": 180,
+            "description": "Optional nested alias for receiver_longitude. Supply a latitude/longitude pair. Top-level receiver_longitude takes precedence when present."
+          }
+        },
+        "required": [
+          "name",
+          "phone",
+          "address"
+        ]
+      },
+      "ShipperDetails": {
+        "type": "object",
+        "properties": {
+          "area_id": {
+            "type": "integer",
+            "description": "Optional pickup/shipper area. This is NOT the destination area. Takes precedence over top-level shipper_area_id when both are truthy; otherwise falls back to the customer saved area.",
+            "minimum": 1,
+            "examples": [
+              152
+            ]
+          },
+          "address": {
+            "type": "string",
+            "description": "Optional shipper address; takes precedence over shipper_address when non-empty."
+          }
+        },
+        "description": "Optional shipper/pickup location. Omit this object to use the authenticated commercial customer saved area. If no saved area exists the value remains empty; shipper address has no automatic fallback in this handler."
+      },
+      "CreateProduct": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "Product description.",
+            "minLength": 1
+          },
+          "piece_product_code": {
+            "type": "string",
+            "description": "Recommended integration product code. Supply it for compatibility with deployments without the portal extension."
+          },
+          "quantity": {
+            "type": "number",
+            "description": "Product quantity. Send a finite positive value.",
+            "examples": [
+              1
+            ]
+          },
+          "unit_price": {
+            "type": "number",
+            "description": "Recommended product unit price. Current portal-enabled helper defaults omission to 0; deployments without that extension require this field.",
+            "examples": [
+              10
+            ]
+          },
+          "volume": {
+            "type": "number",
+            "description": "Optional product volume.",
+            "default": 0
+          }
+        },
+        "required": [
+          "description",
+          "quantity"
+        ],
+        "description": "Current local portal-enabled deployment requires description and quantity. Always include piece_product_code and unit_price in customer integrations. The quotation endpoint has its own stricter product schema."
+      },
+      "QuoteProduct": {
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "Product description.",
+            "minLength": 1
+          },
+          "piece_product_code": {
+            "type": "string",
+            "description": "Recommended integration product code. Supply it for compatibility with deployments without the portal extension.",
+            "minLength": 1
+          },
+          "quantity": {
+            "type": "number",
+            "description": "Product quantity. Send a finite positive value.",
+            "examples": [
+              1
+            ],
+            "minimum": 0
+          },
+          "unit_price": {
+            "type": "number",
+            "description": "Finite non-negative product unit price; required for quotations.",
+            "examples": [
+              10
+            ],
+            "minimum": 0
+          },
+          "volume": {
+            "type": "number",
+            "description": "Optional product volume.",
+            "default": 0,
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "description",
+          "piece_product_code",
+          "quantity",
+          "unit_price"
+        ]
+      },
+      "Box": {
+        "type": "object",
+        "properties": {
+          "length": {
+            "type": "number",
+            "description": "Finite non-negative length. Use the measurement units configured for your QEXPRESS account.",
+            "minimum": 0,
+            "examples": [
+              20
+            ]
+          },
+          "width": {
+            "type": "number",
+            "description": "Finite non-negative width. Use the measurement units configured for your QEXPRESS account.",
+            "minimum": 0,
+            "examples": [
+              15
+            ]
+          },
+          "height": {
+            "type": "number",
+            "description": "Finite non-negative height. Use the measurement units configured for your QEXPRESS account.",
+            "minimum": 0,
+            "examples": [
+              5
+            ]
+          },
+          "weight": {
+            "type": "number",
+            "description": "Finite non-negative weight. Use the measurement units configured for your QEXPRESS account.",
+            "minimum": 0,
+            "examples": [
+              0.5
+            ]
+          }
+        },
+        "required": [
+          "length",
+          "width",
+          "height",
+          "weight"
+        ],
+        "description": "One physical box. Dimensions and weight are required. The create handler currently checks non-negativity; quote additionally rejects non-finite values. Use ordinary finite JSON numbers only."
+      },
+      "CreateDeliveryRequest": {
+        "type": "object",
+        "properties": {
+          "receiver_details": {
+            "$ref": "#/components/schemas/ReceiverDetails"
+          },
+          "store_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional store name. Omitted, null or blank is saved empty. Non-string non-null values return 400.",
+            "examples": [
+              "Example Store"
+            ]
+          },
+          "shipper_details": {
+            "$ref": "#/components/schemas/ShipperDetails"
+          },
+          "shipper_area_id": {
+            "type": "integer",
+            "description": "Alternative to shipper_details.area_id. Optional.",
+            "minimum": 1,
+            "examples": [
+              152
+            ]
+          },
+          "shipper_address": {
+            "type": "string",
+            "description": "Alternative to shipper_details.address. Optional."
+          },
+          "area_id": {
+            "type": "integer",
+            "description": "Required receiver/destination area. Obtain the ID from GET /api/areas/{country_id}.",
+            "minimum": 1,
+            "examples": [
+              152
+            ]
+          },
+          "expected_delivery_datetime": {
+            "type": "string",
+            "description": "Local wall-clock time in the API user timezone, falling back to company timezone settings and then Asia/Amman. Do not include an offset. It is converted to UTC internally.",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$",
+            "examples": [
+              "2026-12-01 14:30:00"
+            ]
+          },
+          "payment_type": {
+            "type": "string",
+            "description": "Payment arrangement.",
+            "enum": [
+              "prepaid",
+              "cod"
+            ]
+          },
+          "is_same_day_delivery": {
+            "type": "boolean",
+            "description": "Required, including when false. Send a JSON boolean, not a string."
+          },
+          "currency_id": {
+            "type": "integer",
+            "description": "Required for COD; optional for prepaid. Currency must exist and be active. Prepaid omission uses the company currency.",
+            "minimum": 1,
+            "examples": [
+              152
+            ]
+          },
+          "cod_amount": {
+            "type": "integer",
+            "description": "Required for COD, strictly positive and without decimals. The selected currency digits_number configuration can limit the number of digits. Ignored for prepaid.",
+            "minimum": 1,
+            "examples": [
+              25
+            ]
+          },
+          "products": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CreateProduct"
+            },
+            "minItems": 1
+          },
+          "num_of_boxes": {
+            "type": "integer",
+            "description": "Required unless number_of_boxes is supplied. Must equal boxes.length.",
+            "minimum": 1,
+            "examples": [
+              1
+            ]
+          },
+          "number_of_boxes": {
+            "type": "integer",
+            "description": "Legacy alias for num_of_boxes. Prefer num_of_boxes. If both are present num_of_boxes takes precedence.",
+            "minimum": 1,
+            "deprecated": true
+          },
+          "boxes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Box"
+            },
+            "minItems": 1
+          },
+          "internal_tracking_number": {
+            "type": "string",
+            "description": "Optional unique customer tracking/reference number. Duplicate saved values return 409. No general idempotency key is supported."
+          },
+          "internal_awb_number": {
+            "type": "string",
+            "description": "Alias for internal_tracking_number. The internal_tracking_number value takes precedence when non-empty.",
+            "deprecated": true
+          },
+          "notes": {
+            "type": "string",
+            "description": "Optional delivery notes."
+          },
+          "receiver_latitude": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": -90,
+            "maximum": 90,
+            "description": "Optional receiver destination latitude. Send both receiver coordinates together as JSON numbers, or omit/null both. Zero is valid. Saved with seven decimal places. This top-level field takes precedence over receiver_details.latitude.",
+            "examples": [
+              33.5138
+            ]
+          },
+          "receiver_longitude": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": -180,
+            "maximum": 180,
+            "description": "Optional receiver destination longitude. Send both receiver coordinates together as JSON numbers, or omit/null both. Zero is valid. Saved with seven decimal places. This top-level field takes precedence over receiver_details.longitude.",
+            "examples": [
+              36.2765
+            ]
+          }
+        },
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "num_of_boxes"
+                ]
+              },
+              {
+                "required": [
+                  "number_of_boxes"
+                ]
+              }
+            ]
+          },
+          {
+            "if": {
+              "properties": {
+                "payment_type": {
+                  "const": "cod"
+                }
+              },
+              "required": [
+                "payment_type"
+              ]
+            },
+            "then": {
+              "required": [
+                "cod_amount",
+                "currency_id"
+              ]
+            }
+          },
+          {
+            "if": {
+              "anyOf": [
+                {
+                  "required": [
+                    "receiver_latitude"
+                  ],
+                  "properties": {
+                    "receiver_latitude": {
+                      "type": "number"
+                    }
+                  }
+                },
+                {
+                  "not": {
+                    "required": [
+                      "receiver_latitude"
+                    ]
+                  },
+                  "required": [
+                    "receiver_details"
+                  ],
+                  "properties": {
+                    "receiver_details": {
+                      "required": [
+                        "latitude"
+                      ],
+                      "properties": {
+                        "latitude": {
+                          "type": "number"
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            "then": {
+              "anyOf": [
+                {
+                  "required": [
+                    "receiver_longitude"
+                  ],
+                  "properties": {
+                    "receiver_longitude": {
+                      "type": "number"
+                    }
+                  }
+                },
+                {
+                  "not": {
+                    "required": [
+                      "receiver_longitude"
+                    ]
+                  },
+                  "required": [
+                    "receiver_details"
+                  ],
+                  "properties": {
+                    "receiver_details": {
+                      "required": [
+                        "longitude"
+                      ],
+                      "properties": {
+                        "longitude": {
+                          "type": "number"
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "if": {
+              "anyOf": [
+                {
+                  "required": [
+                    "receiver_longitude"
+                  ],
+                  "properties": {
+                    "receiver_longitude": {
+                      "type": "number"
+                    }
+                  }
+                },
+                {
+                  "not": {
+                    "required": [
+                      "receiver_longitude"
+                    ]
+                  },
+                  "required": [
+                    "receiver_details"
+                  ],
+                  "properties": {
+                    "receiver_details": {
+                      "required": [
+                        "longitude"
+                      ],
+                      "properties": {
+                        "longitude": {
+                          "type": "number"
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            "then": {
+              "anyOf": [
+                {
+                  "required": [
+                    "receiver_latitude"
+                  ],
+                  "properties": {
+                    "receiver_latitude": {
+                      "type": "number"
+                    }
+                  }
+                },
+                {
+                  "not": {
+                    "required": [
+                      "receiver_latitude"
+                    ]
+                  },
+                  "required": [
+                    "receiver_details"
+                  ],
+                  "properties": {
+                    "receiver_details": {
+                      "required": [
+                        "latitude"
+                      ],
+                      "properties": {
+                        "latitude": {
+                          "type": "number"
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "required": [
+          "receiver_details",
+          "area_id",
+          "expected_delivery_datetime",
+          "payment_type",
+          "is_same_day_delivery",
+          "products",
+          "boxes"
+        ],
+        "description": "Creates an express/local delivery for the authenticated API user commercial customer. Customer, company, driver and manual delivery fees are not selectable inputs. Unknown create fields are not a supported extension contract. Receiver destination coordinates are optional as a pair and separate from driver attempt GPS. Omitted/null coordinates leave the receiver pin unset; do not send receiver_coordinates_set."
+      },
+      "DeliveryQuoteRequest": {
+        "type": "object",
+        "properties": {
+          "area_id": {
+            "type": "integer",
+            "description": "Destination area.",
+            "minimum": 1,
+            "examples": [
+              152
+            ]
+          },
+          "payment_type": {
+            "type": "string",
+            "enum": [
+              "prepaid",
+              "cod"
+            ]
+          },
+          "boxes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Box"
+            },
+            "minItems": 1,
+            "maxItems": 500
+          },
+          "num_of_boxes": {
+            "type": "integer",
+            "description": "Optional; defaults to boxes.length. Supplied value must match the array length.",
+            "minimum": 1
+          },
+          "number_of_boxes": {
+            "type": "integer",
+            "description": "Legacy box-count alias.",
+            "minimum": 1,
+            "deprecated": true
+          },
+          "expected_delivery_datetime": {
+            "type": "string",
+            "description": "Local wall-clock time in the API user timezone, falling back to company timezone settings and then Asia/Amman. Do not include an offset. It is converted to UTC internally.",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}$",
+            "examples": [
+              "2026-12-01 14:30:00"
+            ]
+          },
+          "currency_id": {
+            "type": "integer",
+            "description": "Optional active currency; defaults to company currency even for COD quotes.",
+            "minimum": 1,
+            "examples": [
+              152
+            ]
+          },
+          "cod_amount": {
+            "type": "integer",
+            "description": "Optional for a COD quote. If supplied for COD, must be a positive whole number within the currency digit limit. Quote does not require COD amount/currency the way order creation does.",
+            "minimum": 1
+          },
+          "products": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuoteProduct"
+            },
+            "maxItems": 500,
+            "description": "Optional product details; defaults to empty. Box measurements are still required."
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "area_id",
+          "payment_type",
+          "boxes"
+        ],
+        "description": "Price quotation only: no order, pickup, invoice or label is created. Only listed top-level fields are accepted. Do not send receiver/shipper/customer IDs, driver prices or manual fees. The quotation uses the API commercial customer, express/local pricing and the selected date (today when omitted)."
+      },
+      "LabelReference": {
+        "type": "object",
+        "properties": {
+          "ref_number": {
+            "type": "string",
+            "description": "Shipment barcode/name, business sequence or internal tracking number.",
+            "minLength": 1
+          },
+          "shipment_number": {
+            "type": "string",
+            "description": "Shipment barcode/name, business sequence or internal tracking number.",
+            "minLength": 1
+          },
+          "delivery_order": {
+            "type": "string",
+            "description": "Shipment barcode/name, business sequence or internal tracking number.",
+            "minLength": 1
+          }
+        },
+        "anyOf": [
+          {
+            "required": [
+              "ref_number"
+            ]
+          },
+          {
+            "required": [
+              "shipment_number"
+            ]
+          },
+          {
+            "required": [
+              "delivery_order"
+            ]
+          }
+        ],
+        "description": "Supply any one reference key. Precedence: ref_number, shipment_number, delivery_order."
+      },
+      "ReturnRequest": {
+        "type": "object",
+        "properties": {
+          "delivery_order": {
+            "type": "string",
+            "description": "Original delivery barcode/name or business sequence; internal tracking number is not supported by the return lookup.",
+            "minLength": 1
+          },
+          "delivery_order_name": {
+            "type": "string",
+            "description": "Legacy alias for delivery_order.",
+            "deprecated": true
+          },
+          "return_datetime": {
+            "type": "string",
+            "description": "Local wall-clock time in the API user timezone, falling back to company timezone settings and then Asia/Amman. Do not include an offset. It is converted to UTC internally.",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}( \\d{2}:\\d{2}:\\d{2})?$",
+            "examples": [
+              "2026-12-01 14:30:00"
+            ]
+          },
+          "datetime": {
+            "type": "string",
+            "description": "Legacy alias for return_datetime. Prefer return_datetime.",
+            "deprecated": true
+          },
+          "return_note": {
+            "type": "string",
+            "description": "Required return explanation.",
+            "minLength": 1
+          },
+          "return_reason": {
+            "type": "string",
+            "enum": [
+              "customer_refused",
+              "damaged",
+              "wrong_item",
+              "partial_return",
+              "other"
+            ]
+          },
+          "payment_type": {
+            "type": "string",
+            "enum": [
+              "prepaid",
+              "cod"
+            ]
+          },
+          "cod_currency_id": {
+            "type": "integer",
+            "description": "Required for COD unless currency_id is supplied. Must be an active currency.",
+            "minimum": 1,
+            "examples": [
+              152
+            ]
+          },
+          "currency_id": {
+            "type": "integer",
+            "description": "Alias for cod_currency_id. cod_currency_id takes precedence.",
+            "minimum": 1,
+            "examples": [
+              152
+            ],
+            "deprecated": true
+          },
+          "cod_amount": {
+            "type": "number",
+            "description": "Required for COD and greater than zero; model/business constraints still apply.",
+            "exclusiveMinimum": 0
+          },
+          "area_id": {
+            "type": "integer",
+            "description": "Optional destination area for the reverse shipment; not a shipper-area field.",
+            "minimum": 1,
+            "examples": [
+              152
+            ]
+          }
+        },
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "delivery_order"
+                ]
+              },
+              {
+                "required": [
+                  "delivery_order_name"
+                ]
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "return_datetime"
+                ]
+              },
+              {
+                "required": [
+                  "datetime"
+                ]
+              }
+            ]
+          },
+          {
+            "if": {
+              "properties": {
+                "payment_type": {
+                  "const": "cod"
+                }
+              },
+              "required": [
+                "payment_type"
+              ]
+            },
+            "then": {
+              "required": [
+                "cod_amount"
+              ],
+              "anyOf": [
+                {
+                  "required": [
+                    "cod_currency_id"
+                  ]
+                },
+                {
+                  "required": [
+                    "currency_id"
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        "required": [
+          "return_note",
+          "return_reason",
+          "payment_type"
+        ],
+        "description": "The original order must be Delivered or Partially Returned and must not already have an active return. API return datetime also accepts a date-only YYYY-MM-DD via the shared parser; full local datetime is recommended. Confirmation creates a reverse delivery. Do not blindly retry a failed request; see the operational notes."
+      },
+      "Country": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "Database ID returned by a lookup endpoint.",
+            "minimum": 1,
+            "examples": [
+              152
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "code"
+        ]
+      },
+      "Currency": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "Database ID returned by a lookup endpoint.",
+            "minimum": 1,
+            "examples": [
+              152
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "Currency code."
+          },
+          "symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "const": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "position": {
+            "type": "string",
+            "enum": [
+              "before",
+              "after"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "symbol",
+          "position"
+        ]
+      },
+      "City": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "Database ID returned by a lookup endpoint.",
+            "minimum": 1,
+            "examples": [
+              152
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "const": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "country_id": {
+            "type": "integer",
+            "description": "Database ID returned by a lookup endpoint.",
+            "minimum": 1,
+            "examples": [
+              152
+            ]
+          },
+          "country_name": {
+            "type": "string"
+          },
+          "country_code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "code",
+          "country_id",
+          "country_name",
+          "country_code"
+        ]
+      },
+      "Area": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "Database ID returned by a lookup endpoint.",
+            "minimum": 1,
+            "examples": [
+              152
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "const": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "city_id": {
+            "type": "integer"
+          },
+          "city_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "const": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "country_id": {
+            "type": "integer",
+            "description": "Database ID returned by a lookup endpoint.",
+            "minimum": 1,
+            "examples": [
+              152
+            ]
+          },
+          "country_name": {
+            "type": "string"
+          },
+          "zone_id": {
+            "type": "integer"
+          },
+          "zone_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "const": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "code",
+          "city_id",
+          "city_name",
+          "country_id",
+          "country_name",
+          "zone_id",
+          "zone_name"
+        ]
+      },
+      "CountryState": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "description": "Database ID returned by a lookup endpoint.",
+            "minimum": 1,
+            "examples": [
+              152
+            ]
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "LabelData": {
+        "type": "object",
+        "properties": {
+          "ref_number": {
+            "type": "string",
+            "description": "Delivery barcode/reference."
+          },
+          "print_label_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "image/png",
+                  "application/pdf"
+                ]
+              },
+              {
+                "const": false
+              }
+            ]
+          },
+          "print_label_image_base64": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "byte"
+              },
+              {
+                "const": false
+              }
+            ],
+            "description": "Base64 PNG, or false if PDF-to-PNG conversion is unavailable/fails."
+          },
+          "print_label_pdf_base64": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "byte"
+              },
+              {
+                "const": false
+              }
+            ],
+            "description": "Base64 PDF; false if no PDF content is produced."
+          }
+        },
+        "required": [
+          "ref_number",
+          "print_label_type",
+          "print_label_image_base64",
+          "print_label_pdf_base64"
+        ],
+        "description": "The label is 10×15. When PNG conversion is available both PNG and PDF may be included; otherwise PDF is returned. Decode the matching base64 field before saving/printing."
+      },
+      "ReturnData": {
+        "type": "object",
+        "properties": {
+          "return_ref": {
+            "type": "string"
+          },
+          "delivery_order": {
+            "type": "string",
+            "description": "Original order barcode."
+          },
+          "returned_delivery_order": {
+            "type": "string",
+            "description": "New reverse order barcode."
+          },
+          "print_label_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "image/png",
+                  "application/pdf"
+                ]
+              },
+              {
+                "const": false
+              }
+            ]
+          },
+          "print_label_image_base64": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "byte"
+              },
+              {
+                "const": false
+              }
+            ],
+            "description": "Base64 PNG, or false if PDF-to-PNG conversion is unavailable/fails."
+          },
+          "print_label_pdf_base64": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "byte"
+              },
+              {
+                "const": false
+              }
+            ],
+            "description": "Base64 PDF; false if no PDF content is produced."
+          }
+        },
+        "required": [
+          "return_ref",
+          "delivery_order",
+          "returned_delivery_order",
+          "print_label_type",
+          "print_label_image_base64",
+          "print_label_pdf_base64"
+        ]
+      },
+      "QuoteData": {
+        "type": "object",
+        "properties": {
+          "cod_commission": {
+            "type": "number",
+            "description": "Configured COD commission."
+          },
+          "delivery_cost": {
+            "type": "number",
+            "description": "Maximum of the customer delivery weight and volume cost."
+          },
+          "total": {
+            "type": "number",
+            "description": "Computed customer delivery total."
+          }
+        },
+        "required": [
+          "cod_commission",
+          "delivery_cost",
+          "total"
+        ]
+      },
+      "TrackingStep": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "created",
+              "collected",
+              "departed",
+              "in_transit",
+              "arrived_destination",
+              "out_for_delivery",
+              "delivered"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "is_completed": {
+            "type": "boolean"
+          },
+          "is_current": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "status",
+          "is_completed",
+          "is_current"
+        ]
+      },
+      "TrackingAttempt": {
+        "type": "object",
+        "properties": {
+          "reason_note": {
+            "type": "string",
+            "description": "Failure label and failure note joined by a dash when available."
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "const": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Stored UTC timestamp as YYYY-MM-DD HH:MM:SS, without an offset, or false. This differs from request datetimes, which are interpreted in the API user timezone."
+          },
+          "station": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "const": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "const": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "const": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "reason_note",
+          "date",
+          "station",
+          "code",
+          "description"
+        ]
+      },
+      "TrackingData": {
+        "type": "object",
+        "properties": {
+          "tracking_details": {
+            "type": "object",
+            "properties": {
+              "shipment_number": {
+                "type": "string"
+              },
+              "internal_tracking_number": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "const": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "current_status": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "description": "Actual order state, which can include states outside the progress-step list."
+                  },
+                  "status": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code",
+                  "status"
+                ]
+              },
+              "statuses": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/TrackingStep"
+                }
+              }
+            },
+            "required": [
+              "shipment_number",
+              "internal_tracking_number",
+              "current_status",
+              "statuses"
+            ]
+          },
+          "shipment_history": {
+            "type": "object",
+            "properties": {
+              "shipment_attempts": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/TrackingAttempt"
+                },
+                "description": "Newest attempt first."
+              }
+            },
+            "required": [
+              "shipment_attempts"
+            ]
+          }
+        },
+        "required": [
+          "tracking_details",
+          "shipment_history"
+        ]
+      },
+      "CountriesResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "const": true
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Country"
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "success",
+          "data",
+          "message"
+        ]
+      },
+      "CurrenciesResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "const": true
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Currency"
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "success",
+          "data",
+          "message"
+        ]
+      },
+      "CitiesResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "const": true
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/City"
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "success",
+          "data",
+          "message"
+        ]
+      },
+      "AreasResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "const": true
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Area"
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "success",
+          "data",
+          "message"
+        ]
+      },
+      "StatesResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "const": true
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CountryState"
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "success",
+          "data",
+          "message"
+        ]
+      },
+      "DeliveryResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "const": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/LabelData"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "success",
+          "data",
+          "message"
+        ]
+      },
+      "LabelResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "const": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/LabelData"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "success",
+          "data",
+          "message"
+        ]
+      },
+      "ReturnResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "const": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/ReturnData"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "success",
+          "data",
+          "message"
+        ]
+      },
+      "QuoteResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "const": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/QuoteData"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "success",
+          "data",
+          "message"
+        ]
+      },
+      "TrackingResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "const": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/TrackingData"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "success",
+          "data",
+          "message"
+        ]
+      },
+      "LabelPathBody": {
+        "type": "object",
+        "properties": {
+          "ref_number": {
+            "type": "string",
+            "description": "Shipment barcode/name, business sequence or internal tracking number.",
+            "minLength": 1
+          },
+          "shipment_number": {
+            "type": "string",
+            "description": "Shipment barcode/name, business sequence or internal tracking number.",
+            "minLength": 1
+          },
+          "delivery_order": {
+            "type": "string",
+            "description": "Shipment barcode/name, business sequence or internal tracking number.",
+            "minLength": 1
+          }
+        },
+        "description": "Send {} when ref_number is already supplied in the URL. The body itself is still required by the POST parser."
+      },
+      "ContactForm": {
+        "type": "object",
+        "required": [
+          "fullname",
+          "email",
+          "phone",
+          "company",
+          "subject"
+        ],
+        "properties": {
+          "fullname": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Contact full name."
+          },
+          "email": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Email address.",
+            "format": "email"
+          },
+          "phone": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Digits only; no +, spaces or punctuation for these website forms.",
+            "pattern": "^\\d+$"
+          },
+          "company": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Company name."
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Ticket/lead subject."
+          },
+          "body": {
+            "type": "string",
+            "description": "Optional message body."
+          }
+        }
+      },
+      "HelpForm": {
+        "type": "object",
+        "required": [
+          "fullname",
+          "email",
+          "phone",
+          "company",
+          "subject"
+        ],
+        "properties": {
+          "fullname": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Contact full name."
+          },
+          "email": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Email address.",
+            "format": "email"
+          },
+          "phone": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Digits only; no +, spaces or punctuation for these website forms.",
+            "pattern": "^\\d+$"
+          },
+          "company": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Company name."
+          },
+          "subject": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Ticket/lead subject."
+          },
+          "body": {
+            "type": "string",
+            "description": "Optional message body."
+          },
+          "attachment": {
+            "type": "string",
+            "format": "binary",
+            "description": "Optional single uploaded attachment; only the help endpoint reads it."
+          }
+        }
+      },
+      "WebsiteFormResponse": {
+        "type": "object",
+        "required": [
+          "success",
+          "data",
+          "message"
+        ],
+        "properties": {
+          "success": {
+            "const": true
+          },
+          "data": {
+            "type": "object",
+            "required": [
+              "id"
+            ],
+            "properties": {
+              "id": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "parameters": {
+      "Database": {
+        "name": "X-Odoo-Database",
+        "in": "header",
+        "required": false,
+        "description": "Use the database name supplied by QEXPRESS when the host does not resolve a single database. Do not copy a local database name to production. Avoid sending a conflicting Odoo session cookie.",
+        "schema": {
+          "type": "string"
+        },
+        "example": "YOUR_ASSIGNED_DATABASE"
+      },
+      "Language": {
+        "name": "lang",
+        "in": "header",
+        "required": false,
+        "description": "Optional installed Odoo language code; takes precedence over Accept-Language. Labels/messages vary by installed translations.",
+        "schema": {
+          "type": "string"
+        },
+        "example": "en_US"
+      },
+      "AcceptLanguage": {
+        "name": "Accept-Language",
+        "in": "header",
+        "required": false,
+        "description": "Optional language preference used when lang is absent.",
+        "schema": {
+          "type": "string"
+        },
+        "example": "en-US"
+      }
+    },
+    "responses": {
+      "400": {
+        "description": "Invalid request. Error data is optional.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "success": false,
+              "message": "Missing required fields: receiver_details.name.",
+              "data": {
+                "required_fields": [
+                  "receiver_details.name"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "401": {
+        "description": "API authentication failed.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "success": false,
+              "message": "Unauthorized: API key is missing"
+            }
+          }
+        }
+      },
+      "403": {
+        "description": "No eligible customer contract.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "success": false,
+              "message": "No active delivery contract is available for your account. Please contact your system administrator for assistance."
+            }
+          }
+        }
+      },
+      "404": {
+        "description": "Requested record not found.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "success": false,
+              "message": "Area not found."
+            }
+          }
+        }
+      },
+      "409": {
+        "description": "Duplicate reference or active return conflict.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "success": false,
+              "message": "Internal Tracking Number already exists.",
+              "data": {
+                "internal_tracking_number": "CUSTOMER-EXAMPLE-001"
+              }
+            }
+          }
+        }
+      },
+      "422": {
+        "description": "No matching pricing contract/rule.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "success": false,
+              "message": "Pricing is currently unavailable for this delivery. Please contact support for assistance."
+            }
+          }
+        }
+      },
+      "500": {
+        "description": "Server or business operation failure.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "success": false,
+              "message": "The operation could not be completed."
+            }
+          }
+        }
+      }
+    }
+  },
+  "x-qexpress-source-review": {
+    "date": "2026-11-22",
+    "scope": "Local Odoo 19 QEXPRESS customer delivery controllers; not production verification",
+    "source_modules": [
+      "re_logistics_equipment",
+      "re_logistics_portal"
+    ],
+    "source_version": "current local working tree"
+  }
+}

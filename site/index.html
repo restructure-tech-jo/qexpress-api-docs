@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="QEXPRESS Delivery API documentation: authentication, delivery orders, shipping costs, tracking, labels, and returns.">
+  <meta name="color-scheme" content="light dark">
+  <title>QEXPRESS · API Documentation</title>
+  <style>
+    :root {font-family:Inter,ui-sans-serif,system-ui,sans-serif;color:#16242b;background:#fff;--scalar-color-accent:#087e8b}
+    * {box-sizing:border-box} body {margin:0} a {color:inherit}
+    .brand {display:flex;align-items:center;justify-content:space-between;gap:20px;padding:18px 28px;border-bottom:1px solid #e2e8ed;background:#fff}
+    .wordmark {font-size:22px;font-weight:850;letter-spacing:.02em;text-decoration:none}.wordmark span {color:#087e8b}
+    .subtitle {font-size:14px;color:#526671;margin-left:16px}.download {font-size:14px;font-weight:600;text-decoration:none;padding:9px 14px;border:1px solid #cedade;border-radius:8px}
+    .download:hover {background:#edf8f8}.loading {padding:48px 28px;max-width:740px;line-height:1.6}.loading h1 {font-size:28px}
+    @media(max-width:600px) {.brand{padding:16px;gap:12px}.subtitle{display:block;margin:3px 0 0}.download{font-size:13px;padding:8px}}
+    @media(prefers-color-scheme:dark) {:root{color:#edf4f7;background:#111820}.brand{background:#111820;border-color:#2d3b45}.subtitle{color:#b0c2cc}.download{border-color:#40515d}.download:hover{background:#20343b}}
+  </style>
+</head>
+<body>
+  <header class="brand">
+    <div><a class="wordmark" href="./">Q<span>EXPRESS</span></a><span class="subtitle">Developer documentation</span></div>
+    <a class="download" href="./openapi.json" download="qexpress-openapi.json">Download OpenAPI</a>
+  </header>
+  <main id="api-reference">
+    <section class="loading" aria-live="polite"><h1>QEXPRESS Delivery API</h1><p>Loading the API reference…</p><p>You can also <a href="./openapi.json">download the OpenAPI specification</a>.</p></section>
+  </main>
+  <noscript><p class="loading">Enable JavaScript to view the interactive reference, or download the OpenAPI file above.</p></noscript>
+  <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.82.1/dist/browser/standalone.js" crossorigin="anonymous"></script>
+  <script>
+    if (window.Scalar) {
+      Scalar.createApiReference('#api-reference', {
+        url: './openapi.json',
+        theme: 'default',
+        layout: 'modern',
+        persistAuth: false,
+        telemetry: false,
+        showSidebar: true,
+        defaultHttpClient: { targetKey: 'shell', clientKey: 'curl' }
+      });
+    } else {
+      document.querySelector('.loading p').textContent = 'The interactive reference could not load. Please refresh or download the OpenAPI file below.';
+    }
+  </script>
+</body>
+</html>
