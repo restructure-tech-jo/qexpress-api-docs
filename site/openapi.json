@@ -3,7 +3,7 @@
   "info": {
     "title": "QEXPRESS Delivery API",
     "version": "1.0.2",
-    "description": "Integrate shipment creation, pricing, tracking, labels, and returns with QEXPRESS.\n\n## Authentication\nSend your raw API key in `Authorization: YOUR_API_KEY`. Do not prepend `Bearer ` and do not use an `api_key` header. Use `Content-Type: application/json` for POST. Supply `X-Odoo-Database` only with the database name assigned by QEXPRESS when database selection requires it. Production and staging IDs/database names are not interchangeable. Optional `lang` / `Accept-Language` headers select installed translations; the current user language is used when no language header is provided.\n\n## Recommended integration flow\n1. Obtain your API key and assigned environment/database from QEXPRESS.\n2. Read countries and active currencies; then contract-covered cities/areas.\n3. Quote with `POST /api/delivery/cost` if needed.\n4. Create with `POST /api/delivery_request`, including shipper information when pickup differs from your saved customer area, and a unique customer tracking reference.\n5. Decode the returned label; poll the tracking endpoint as needed.\n6. Use the return endpoint only for eligible delivered shipments.\n\n## Request and response conventions\nAll example IDs, references, dates, prices and addresses are illustrative. Requests are ordinary HTTP JSON, not JSON-RPC envelopes. Error `data` is optional. Handled errors use the Error schema; uncaught Odoo/proxy errors may instead return HTML/text. No API rate-limit, pagination or idempotency-key contract is defined by these delivery controllers. Use bounded retries for reads; reconcile writes before retrying. Never log credentials.\n\nRequest datetime strings are interpreted in the API user timezone with company/Asia/Amman fallback and converted to UTC. Tracking attempt date strings are UTC. Use real country/area/currency IDs from the same environment. Monetary precision and maximum COD digits depend on account/currency configuration.\n\n## Availability\nThese are the installed customer delivery integration endpoints. Portal session APIs, migration/admin/backup endpoints and internal financial exports are documented separately in the developer route inventory; they do not use this API-key contract. `/api/contact`, `/api/help` and `/re_logistics_api/sync` belong to modules currently uninstalled locally and are not advertised as available. This reference does not claim production testing or deployment.\n\n\n## Coordinates\nThe customer delivery-create API accepts optional receiver_latitude and receiver_longitude together, or receiver_details.latitude/longitude as nested aliases. These save a receiver destination pin, with top-level fields taking precedence. Omit/null both to leave the pin empty; zero is valid. Both are JSON numbers and must be within -90..90 / -180..180. Use shipper_details.area_id/address for pickup and area_id plus receiver_details.address for destination. Driver delivery-attempt GPS, attendance coordinates and live-vehicle tracking are separate portal/internal workflows; this change does not add shipper coordinates or change tracking response fields.\n\n## Optional website-form endpoints\nThe previous published reference included /api/contact and /api/help. They are retained below under Optional website forms with complete schemas, but require re_website_form_api, which is uninstalled locally. Their production availability is unverified. They accept form data, not JSON. Use the raw Authorization key; these website-form helpers also accept a Bearer prefix, unlike the delivery helper.\n"
+    "description": "Create and track QEXPRESS deliveries, calculate shipping costs, download labels, and request returns.\n\n## Authentication\nSend your API key as `Authorization: YOUR_API_KEY` (without `Bearer`). Send JSON requests with `Content-Type: application/json`.\n\n## Get started\nUse the lookup endpoints to get your area and currency IDs, then create a delivery with `POST /api/delivery_request`. Optional receiver fields include `receiver_otp`, `receiver_verify_link`, and the latitude/longitude pair.\n\nExamples use illustrative values. Confirm your API environment and enabled endpoints with QEXPRESS."
   },
   "servers": [
     {
@@ -538,7 +538,9 @@
                       }
                     ],
                     "receiver_latitude": 33.5138,
-                    "receiver_longitude": 36.2765
+                    "receiver_longitude": 36.2765,
+                    "receiver_otp": "001234",
+                    "receiver_verify_link": "https://example.com/verify/demo-reference"
                   }
                 },
                 "COD with shipper and store": {
@@ -581,7 +583,9 @@
                     "currency_id": 1,
                     "cod_amount": 25,
                     "receiver_latitude": 33.5138,
-                    "receiver_longitude": 36.2765
+                    "receiver_longitude": 36.2765,
+                    "receiver_otp": "001234",
+                    "receiver_verify_link": "https://example.com/verify/demo-reference"
                   }
                 },
                 "Top-level shipper aliases": {
@@ -618,7 +622,9 @@
                       }
                     ],
                     "shipper_area_id": 152,
-                    "shipper_address": "Example pickup address"
+                    "shipper_address": "Example pickup address",
+                    "receiver_otp": "001234",
+                    "receiver_verify_link": "https://example.com/verify/demo-reference"
                   }
                 },
                 "Nested receiver coordinates": {
@@ -659,7 +665,9 @@
                         "height": 5,
                         "weight": 0.5
                       }
-                    ]
+                    ],
+                    "receiver_otp": "001234",
+                    "receiver_verify_link": "https://example.com/verify/demo-reference"
                   }
                 },
                 "Without receiver coordinates": {
@@ -698,7 +706,9 @@
                         "height": 5,
                         "weight": 0.5
                       }
-                    ]
+                    ],
+                    "receiver_otp": "001234",
+                    "receiver_verify_link": "https://example.com/verify/demo-reference"
                   }
                 }
               }
@@ -2146,6 +2156,26 @@
             "description": "Optional receiver destination longitude. Send both receiver coordinates together as JSON numbers, or omit/null both. Zero is valid. Saved with seven decimal places. This top-level field takes precedence over receiver_details.longitude.",
             "examples": [
               36.2765
+            ]
+          },
+          "receiver_otp": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional receiver verification code. Send as text to preserve leading zeros. Omitted, null or blank saves empty.",
+            "examples": [
+              "001234"
+            ]
+          },
+          "receiver_verify_link": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional absolute HTTP or HTTPS receiver verification URL. Omitted, null or blank saves empty.",
+            "examples": [
+              "https://example.com/verify/demo-reference"
             ]
           }
         },
