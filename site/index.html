@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="QEXPRESS Delivery API documentation: authentication, delivery orders, shipping costs, tracking, labels, and returns.">
-  <meta name="color-scheme" content="light dark">
+  <meta name="color-scheme" content="light">
   <title>QEXPRESS · API Documentation</title>
   <style>
     :root {font-family:Inter,ui-sans-serif,system-ui,sans-serif;color:#16242b;background:#fff;--scalar-color-accent:#087e8b}
@@ -14,7 +14,6 @@
     .subtitle {font-size:14px;color:#526671;margin-left:16px}.download {font-size:14px;font-weight:600;text-decoration:none;padding:9px 14px;border:1px solid #cedade;border-radius:8px}
     .download:hover {background:#edf8f8}.loading {padding:48px 28px;max-width:740px;line-height:1.6}.loading h1 {font-size:28px}
     @media(max-width:600px) {.brand{padding:16px;gap:12px}.subtitle{display:block;margin:3px 0 0}.download{font-size:13px;padding:8px}}
-    @media(prefers-color-scheme:dark) {:root{color:#edf4f7;background:#111820}.brand{background:#111820;border-color:#2d3b45}.subtitle{color:#b0c2cc}.download{border-color:#40515d}.download:hover{background:#20343b}}
   </style>
 </head>
 <body>
@@ -32,7 +31,10 @@
       Scalar.createApiReference('#api-reference', {
         url: './openapi.json',
         theme: 'default',
-        layout: 'modern',
+        layout: 'classic',
+        darkMode: false,
+        forceDarkModeState: 'light',
+        hideDarkModeToggle: true,
         persistAuth: false,
         telemetry: false,
         showSidebar: true,
