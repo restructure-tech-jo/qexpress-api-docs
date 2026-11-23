@@ -3,7 +3,7 @@
   "info": {
     "title": "QEXPRESS Delivery API",
     "version": "1.0.2",
-    "description": "Create and track QEXPRESS deliveries, calculate shipping costs, download labels, and request returns.\n\n## Authentication\nSend your API key as `Authorization: YOUR_API_KEY` (without `Bearer`). Send JSON requests with `Content-Type: application/json`.\n\n## Get started\nUse the lookup endpoints to get your area and currency IDs, then create a delivery with `POST /api/delivery_request`. Optional receiver fields include `receiver_otp`, `receiver_verify_link`, and the latitude/longitude pair.\n\nExamples use illustrative values. Confirm your API environment and enabled endpoints with QEXPRESS."
+    "description": "Create and track QEXPRESS deliveries, calculate shipping costs, download labels, and request returns.\n\n## Authentication\nSend your API key as `Authorization: YOUR_API_KEY` (without `Bearer`). Send JSON requests with `Content-Type: application/json`.\n\n## Get started\nUse the lookup endpoints to get your area and currency IDs, then create a delivery with `POST /api/delivery_request`. Optional store phones and coordinates are also accepted. Optional receiver fields include `receiver_otp`, `receiver_verify_link`, and the latitude/longitude pair.\n\nExamples use illustrative values. Confirm your API environment and enabled endpoints with QEXPRESS."
   },
   "servers": [
     {
@@ -540,7 +540,11 @@
                     "receiver_latitude": 33.5138,
                     "receiver_longitude": 36.2765,
                     "receiver_otp": "001234",
-                    "receiver_verify_link": "https://example.com/verify/demo-reference"
+                    "receiver_verify_link": "https://example.com/verify/demo-reference",
+                    "store_phone": "+963900000001",
+                    "store_second_phone": "+963900000002",
+                    "store_longitude": 36.2765,
+                    "store_latitude": 33.5138
                   }
                 },
                 "COD with shipper and store": {
@@ -585,7 +589,11 @@
                     "receiver_latitude": 33.5138,
                     "receiver_longitude": 36.2765,
                     "receiver_otp": "001234",
-                    "receiver_verify_link": "https://example.com/verify/demo-reference"
+                    "receiver_verify_link": "https://example.com/verify/demo-reference",
+                    "store_phone": "+963900000001",
+                    "store_second_phone": "+963900000002",
+                    "store_longitude": 36.2765,
+                    "store_latitude": 33.5138
                   }
                 },
                 "Top-level shipper aliases": {
@@ -624,7 +632,11 @@
                     "shipper_area_id": 152,
                     "shipper_address": "Example pickup address",
                     "receiver_otp": "001234",
-                    "receiver_verify_link": "https://example.com/verify/demo-reference"
+                    "receiver_verify_link": "https://example.com/verify/demo-reference",
+                    "store_phone": "+963900000001",
+                    "store_second_phone": "+963900000002",
+                    "store_longitude": 36.2765,
+                    "store_latitude": 33.5138
                   }
                 },
                 "Nested receiver coordinates": {
@@ -667,7 +679,11 @@
                       }
                     ],
                     "receiver_otp": "001234",
-                    "receiver_verify_link": "https://example.com/verify/demo-reference"
+                    "receiver_verify_link": "https://example.com/verify/demo-reference",
+                    "store_phone": "+963900000001",
+                    "store_second_phone": "+963900000002",
+                    "store_longitude": 36.2765,
+                    "store_latitude": 33.5138
                   }
                 },
                 "Without receiver coordinates": {
@@ -708,7 +724,11 @@
                       }
                     ],
                     "receiver_otp": "001234",
-                    "receiver_verify_link": "https://example.com/verify/demo-reference"
+                    "receiver_verify_link": "https://example.com/verify/demo-reference",
+                    "store_phone": "+963900000001",
+                    "store_second_phone": "+963900000002",
+                    "store_longitude": 36.2765,
+                    "store_latitude": 33.5138
                   }
                 }
               }
@@ -2176,6 +2196,50 @@
             "description": "Optional absolute HTTP or HTTPS receiver verification URL. Omitted, null or blank saves empty.",
             "examples": [
               "https://example.com/verify/demo-reference"
+            ]
+          },
+          "store_phone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional Store Phone 1. Send as text to preserve leading zeros and country prefix. Omitted, null or blank saves empty.",
+            "examples": [
+              "+963900000001"
+            ]
+          },
+          "store_second_phone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional Store Phone 2. Send as text. Omitted, null or blank saves empty.",
+            "examples": [
+              "+963900000002"
+            ]
+          },
+          "store_longitude": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": -180,
+            "maximum": 180,
+            "description": "Optional store longitude as a finite JSON number, saved with seven decimal places. Omit or send null when unavailable; zero is valid. Can be sent independently of store_latitude.",
+            "examples": [
+              36.2765
+            ]
+          },
+          "store_latitude": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": -90,
+            "maximum": 90,
+            "description": "Optional store latitude as a finite JSON number, saved with seven decimal places. Omit or send null when unavailable; zero is valid. Can be sent independently of store_longitude.",
+            "examples": [
+              33.5138
             ]
           }
         },
