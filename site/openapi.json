@@ -1735,6 +1735,121 @@
           }
         }
       }
+    },
+    "/api/delivery/state": {
+      "post": {
+        "operationId": "getBulkDeliveryStates",
+        "summary": "Get shipment states in bulk",
+        "tags": [
+          "Tracking"
+        ],
+        "description": "Read Status and Delivery Status for one or more shipment numbers. Send a JSON array directly, or an object with shipment_numbers. Maximum 500 entries. Each entry must be a non-empty string. Matches shipment_number (barcode), not internal_tracking_number. Results preserve order and duplicates. Missing or inaccessible shipments return found=false without failing the batch. Uses the authenticated commercial customer, allowed companies and delivery-mode restrictions. This endpoint does not create or update shipments. All shipment identifiers and status combinations in these examples are fictional.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Database"
+          },
+          {
+            "$ref": "#/components/parameters/Language"
+          },
+          {
+            "$ref": "#/components/parameters/AcceptLanguage"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeliveryStateRequest"
+              },
+              "examples": {
+                "bulk": {
+                  "value": [
+                    "DEMO-SHIPMENT-001",
+                    "DEMO-SHIPMENT-002",
+                    "UNKNOWN-SHIPMENT"
+                  ]
+                },
+                "single": {
+                  "value": [
+                    "DEMO-SHIPMENT-001"
+                  ]
+                },
+                "object": {
+                  "value": {
+                    "shipment_numbers": [
+                      "DEMO-SHIPMENT-001",
+                      "DEMO-SHIPMENT-002"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Per-shipment status results, including missing entries.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeliveryStateResponse"
+                },
+                "example": {
+                  "success": true,
+                  "data": [
+                    {
+                      "shipment_number": "DEMO-SHIPMENT-001",
+                      "found": true,
+                      "status": "cancelled",
+                      "status_label": "Cancelled",
+                      "delivery_status": false,
+                      "delivery_status_label": false
+                    },
+                    {
+                      "shipment_number": "DEMO-SHIPMENT-002",
+                      "found": true,
+                      "status": "out_for_delivery",
+                      "status_label": "Out for delivery",
+                      "delivery_status": "returned",
+                      "delivery_status_label": "Returned"
+                    },
+                    {
+                      "shipment_number": "UNKNOWN-SHIPMENT",
+                      "found": false,
+                      "status": false,
+                      "status_label": false,
+                      "delivery_status": false,
+                      "delivery_status_label": false
+                    }
+                  ],
+                  "message": "Delivery states fetched successfully."
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON, invalid entry, empty array or more than 500 entries.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                },
+                "example": {
+                  "success": false,
+                  "message": "Every shipment number must be a non-empty string."
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/401"
+          },
+          "500": {
+            "$ref": "#/components/responses/500"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3065,7 +3180,8 @@
               "in_transit",
               "arrived_destination",
               "out_for_delivery",
-              "delivered"
+              "delivered",
+              "cancelled"
             ]
           },
           "status": {
@@ -3083,7 +3199,8 @@
           "status",
           "is_completed",
           "is_current"
-        ]
+        ],
+        "description": "Delivery progress. For cancelled orders, an extra cancelled entry is current and completed. Normal stages are completed only through the saved pre-cancellation state; unvisited stages remain incomplete."
       },
       "TrackingAttempt": {
         "type": "object",
@@ -3571,6 +3688,124 @@
             "type": "string"
           }
         }
+      },
+      "DeliveryStateRequest": {
+        "anyOf": [
+          {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 500,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "\\S"
+            },
+            "description": "Shipment numbers as strings. Whitespace is trimmed. Input order and duplicates are preserved."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "shipment_numbers": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 500,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "\\S"
+                },
+                "description": "Shipment numbers as strings. Whitespace is trimmed. Input order and duplicates are preserved."
+              }
+            },
+            "required": [
+              "shipment_numbers"
+            ]
+          }
+        ]
+      },
+      "DeliveryStateItem": {
+        "type": "object",
+        "properties": {
+          "shipment_number": {
+            "type": "string"
+          },
+          "found": {
+            "type": "boolean",
+            "description": "False for both missing shipments and shipments outside the authenticated customer/company/access scope."
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "const": false
+              }
+            ],
+            "description": "Actual order Status code, for example created, out_for_delivery, cancelled or delivered. False when not found."
+          },
+          "status_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "const": false
+              }
+            ]
+          },
+          "delivery_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "const": false
+              }
+            ],
+            "description": "Actual Delivery Status code: delivered, failed, rescheduled, returned or postponed. False when empty or not found. This is a separate field from Status."
+          },
+          "delivery_status_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "const": false
+              }
+            ]
+          }
+        },
+        "required": [
+          "shipment_number",
+          "found",
+          "status",
+          "status_label",
+          "delivery_status",
+          "delivery_status_label"
+        ]
+      },
+      "DeliveryStateResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "const": true
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryStateItem"
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "success",
+          "data",
+          "message"
+        ]
       }
     },
     "parameters": {
