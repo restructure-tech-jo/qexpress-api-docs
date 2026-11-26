@@ -1743,7 +1743,7 @@
         "tags": [
           "Tracking"
         ],
-        "description": "Read Status and Delivery Status for one or more shipment numbers. Send a JSON array directly, or an object with shipment_numbers. Maximum 500 entries. Each entry must be a non-empty string. Matches shipment_number (barcode), not internal_tracking_number. Results preserve order and duplicates. Missing or inaccessible shipments return found=false without failing the batch. Uses the authenticated commercial customer, allowed companies and delivery-mode restrictions. This endpoint does not create or update shipments. All shipment identifiers and status combinations in these examples are fictional.",
+        "description": "Read Status and Delivery Status for one or more shipment numbers. Send a JSON array directly, or an object with shipment_numbers. Maximum 500 non-empty string entries. Matches shipment barcode, not internal_tracking_number. Results preserve input order and duplicates. Each result contains only status and delivery_status. Missing or inaccessible shipments have both fields false. An unset delivery_status is false. Uses the authenticated commercial customer, allowed companies and delivery-mode restrictions. Read-only. All example identifiers and statuses are fictional.",
         "parameters": [
           {
             "$ref": "#/components/parameters/Database"
@@ -1799,28 +1799,16 @@
                   "success": true,
                   "data": [
                     {
-                      "shipment_number": "DEMO-SHIPMENT-001",
-                      "found": true,
                       "status": "cancelled",
-                      "status_label": "Cancelled",
-                      "delivery_status": false,
-                      "delivery_status_label": false
+                      "delivery_status": false
                     },
                     {
-                      "shipment_number": "DEMO-SHIPMENT-002",
-                      "found": true,
                       "status": "out_for_delivery",
-                      "status_label": "Out for delivery",
-                      "delivery_status": "returned",
-                      "delivery_status_label": "Returned"
+                      "delivery_status": "returned"
                     },
                     {
-                      "shipment_number": "UNKNOWN-SHIPMENT",
-                      "found": false,
                       "status": false,
-                      "status_label": false,
-                      "delivery_status": false,
-                      "delivery_status_label": false
+                      "delivery_status": false
                     }
                   ],
                   "message": "Delivery states fetched successfully."
@@ -3726,13 +3714,6 @@
       "DeliveryStateItem": {
         "type": "object",
         "properties": {
-          "shipment_number": {
-            "type": "string"
-          },
-          "found": {
-            "type": "boolean",
-            "description": "False for both missing shipments and shipments outside the authenticated customer/company/access scope."
-          },
           "status": {
             "anyOf": [
               {
@@ -3744,16 +3725,6 @@
             ],
             "description": "Actual order Status code, for example created, out_for_delivery, cancelled or delivered. False when not found."
           },
-          "status_label": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "const": false
-              }
-            ]
-          },
           "delivery_status": {
             "anyOf": [
               {
@@ -3764,26 +3735,13 @@
               }
             ],
             "description": "Actual Delivery Status code: delivered, failed, rescheduled, returned or postponed. False when empty or not found. This is a separate field from Status."
-          },
-          "delivery_status_label": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "const": false
-              }
-            ]
           }
         },
         "required": [
-          "shipment_number",
-          "found",
           "status",
-          "status_label",
-          "delivery_status",
-          "delivery_status_label"
-        ]
+          "delivery_status"
+        ],
+        "additionalProperties": false
       },
       "DeliveryStateResponse": {
         "type": "object",
